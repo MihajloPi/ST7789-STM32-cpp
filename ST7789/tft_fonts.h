@@ -1,5 +1,5 @@
-#ifndef __FONT_H
-#define __FONT_H
+#ifndef __TFT_FONT_H
+#define __TFT_FONT_H
 
 #include "stdint.h"
 
@@ -7,12 +7,12 @@ typedef struct {
     const uint8_t width;
     uint8_t height;
     const uint16_t *data;
-} FontDef;
+} TFT_FontDef;
 
 //Font lib.
-extern FontDef Font_7x10;
-extern FontDef Font_11x18;
-extern FontDef Font_16x26;
+extern TFT_FontDef TFT_Font_7x10;
+extern TFT_FontDef TFT_Font_11x18;
+extern TFT_FontDef TFT_Font_16x26;
 
 //16-bit(RGB565) Image lib.
 /*******************************************
