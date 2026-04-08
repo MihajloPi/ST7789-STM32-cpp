@@ -1,4 +1,4 @@
-#include "../Inc/tft_fonts.h"
+#include "tft_fonts.h"
 
 static const uint16_t TFT_Font7x10 [] = {
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,  // sp
