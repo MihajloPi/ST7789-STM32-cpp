@@ -1,69 +1,236 @@
 # ST7789-STM32
-Using STM32's Hardware SPI(with simple DMA support) to drive a ST7789 based LCD display.
 
-## How to use ?
+STM32 HAL driver for ST7789-based TFT LCD displays, using hardware SPI with optional DMA support.  
+Written in C++ with a **camelCase** function naming convention.
 
-1. Copy the "st7789" dir to your project src path, add it to include path   
-2. Include `"st7789.h"` in where you want to use this driver.   
-3. Configure parameters in `"st7789.h"` according to your own display panel  
-4. In system startup, perform `ST7789_Init();`.  
-5. Run a `ST7789_Test()` to exam this driver.  
-6. Don't forget to turn the backlight on  
+> **Based on the original work by [Floyd-Fish](https://github.com/Floyd-Fish/ST7789-STM32).**  
+> Fonts derived from [afiskon's stm32-st7735](https://github.com/afiskon/stm32-st7735) and [ananevilya's Arduino-ST7789-Library](https://github.com/ananevilya/Arduino-ST7789-Library).  
+> Contributors to the upstream project: [JasonLrh](https://github.com/JasonLrh), [ZiangCheng](https://github.com/ZiangCheng).
 
-This code has been tested on 240x240 & 170x320 LCD screens.
-
-> DMA is only useful when huge block write is performed, e.g: Fill full screen or draw a bitmap.  
-> Most MCUs don't have a large enough RAM, so a framebuffer is "cut" into pieces, e.g: a 240x5 pixel buffer for a 240x240 screen.  
-
-## SPI Interface
-
-If you are using **Dupont Line(or jumper wire)**, please notice that your CLK frequency should not exceed 40MHz (may vary, depends on the length of your wire), **otherwise data transfer will collapse!**  
-For higher speed applications, it's recommended to **use PCB** rather than jumper wires.  
-
-In STM32CubeMX/CubeIDE, config the SPI params as follow:
-
-![spi](fig/spi.jpg)
-
-I've had a simple test, connect the screen and mcu via 20cm dupont line, and it works normally on **21.25MB/s**. And if I connect a logic analyzer to the clk and data lines(15cm probe), **21.25MB/s doesn't work anymore**, I have to lower its datarate to 10.625MB/s. Using PCB to connect the display, it works up to **40MB/s** and still looks nice.
+---
 
 ## Supported Displays
 
-- 135*240   
-- 240*240   
-- 170*320 (new)  
+| Resolution | Notes                             |
+|------------|-----------------------------------|
+| 135 × 240  |                                   |
+| 240 × 240  | Tested                            |
+| 170 × 320  | Tested                            |
+| 240 × 320  | Set all shifts to 0               |
 
-If you like, you could customize it's resolution to drive different displays you prefer. 
-> For example, a 240x320 display is perfectly suited for st7789.  
-> Just set all X_SHIFT and Y_SHIFT to 0, and set resolution to 240|320.  
+Any resolution supported by the ST7789 controller can be used — just pass the correct width, height, and shift values to the constructor.
 
-For more details, please refer to ST7789's datasheet.  
+---
 
-## HAL SPI Performance
+## Quick Start
 
-- DMA Enabled
+### 1. Add the files to your project
 
-With DMA enabled, cpu won't participate in the data transfer process. So filling a large size of data block is much faster.e.g. fill, drawImage. (You can see no interval between each data write)
+Copy `Inc/st7789.h`, `Inc/tft_fonts.h`, `Src/st7789.cpp`, and `Src/tft_fonts.c` into your STM32 project.  
+Add the `Inc/` folder to your include path.
 
-![DMA](/fig/fill_dma.png)
+### 2. Configure STM32CubeMX / CubeIDE
 
+Set up an SPI peripheral in **Full-Duplex Master** mode:
 
-- DMA Disabled
+- Data Size: **8 bits**
+- First Bit: **MSB First**
+- Clock speed: up to **40 MHz** on PCB traces, keep ≤ 21 MHz on jumper wires
 
-Without DMA enabled, the filling process could be a suffer. As you can see, before each data byte write, an interval is inserted, so the total datarate would degrade. 
+If using DMA, enable **DMA for SPI TX** in the DMA settings tab.
 
-![noDMA](/fig/fill_normal.png)
+Define the following GPIO pins in CubeMX (or name them yourself):
 
-Especially in some functions where need a little math, the cpu needs to calculate data before a write operation, so the effective datarate would be much lower.(e.g. drawLine)
+| Signal | GPIO label example    |
+|--------|-----------------------|
+| RST    | `ST7789_RST`          |
+| DC     | `ST7789_DC`           |
+| CS     | `ST7789_CS` (optional)|
 
-![line](fig/draw_line.png)
+### 3. Include the header
 
+```cpp
+#include "st7789.h"
+```
 
-# Special thanks to
+### 4. Construct the driver object
 
-#### Reference
-- [ananevilya's Arduino-ST7789-Lib](https://github.com/ananevilya/Arduino-ST7789-Library)  
-- [afiskon's stm32-st7735 lib](https://github.com/afiskon/stm32-st7735)
+```cpp
+// With CS pin
+ST7789 tft(
+    &hspi1,
+    ST7789_RST_GPIO_Port, ST7789_RST_Pin,
+    ST7789_DC_GPIO_Port,  ST7789_DC_Pin,
+    ST7789_CS_GPIO_Port,  ST7789_CS_Pin,
+    240, 320           // width, height
+);
 
-#### Contributor
-- [JasonLrh](https://github.com/JasonLrh)  
-- [ZiangCheng](https://github.com/ZiangCheng)  
+// Without CS pin (CS tied to GND)
+ST7789 tft(
+    &hspi1,
+    ST7789_RST_GPIO_Port, ST7789_RST_Pin,
+    ST7789_DC_GPIO_Port,  ST7789_DC_Pin,
+    nullptr, 0,        // no CS
+    240, 240
+);
+
+// With display offset (e.g. 170x320 panel)
+ST7789 tft(&hspi1,
+    RST_GPIO_Port, RST_Pin,
+    DC_GPIO_Port,  DC_Pin,
+    CS_GPIO_Port,  CS_Pin,
+    170, 320,
+    35, 0              // xShift, yShift
+);
+```
+
+### 5. Initialise
+
+Call `init()` once after power-on, typically in `main()` after HAL and peripheral init:
+
+```cpp
+tft.init();
+```
+
+### 6. (Optional) Run the built-in test
+
+```cpp
+tft.test();   // cycles through colours, fonts, and shapes
+```
+
+### 7. Don't forget the backlight
+
+The backlight pin is not managed by this library. Drive it high (or via PWM) separately.
+
+---
+
+## DMA
+
+DMA is enabled by default via the `#define USE_DMA` at the top of `st7789.h`.  
+Comment it out to fall back to blocking SPI transfers.
+
+With DMA enabled, bulk writes (`fillColor`, `drawImage`) hand off to DMA and poll for completion — freeing the CPU from byte-by-byte work.  
+Small transfers below `DMA_MIN_SIZE` (16 bytes) always use blocking SPI to avoid DMA overhead on tiny payloads.
+
+The internal framebuffer is `HOR_LEN` (default 5) rows tall. Increase it if you have spare RAM for a small speed gain on full-screen fills.
+
+---
+
+## API Reference
+
+### Core
+
+```cpp
+void init();
+void setRotation(uint8_t m);   // 0–3
+```
+
+### Basic drawing
+
+```cpp
+void fillColor(uint16_t color);
+void drawPixel(uint16_t x, uint16_t y, uint16_t color);
+void drawPixel4px(uint16_t x, uint16_t y, uint16_t color);   // 3×3 fat pixel
+void fill(uint16_t xSta, uint16_t ySta, uint16_t xEnd, uint16_t yEnd, uint16_t color);
+```
+
+### Primitives
+
+```cpp
+void drawLine(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
+void drawRectangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
+void drawFilledRectangle(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
+void drawCircle(uint16_t x0, uint16_t y0, uint8_t r, uint16_t color);
+void drawFilledCircle(int16_t x0, int16_t y0, int16_t r, uint16_t color);
+void drawTriangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2,
+                  uint16_t x3, uint16_t y3, uint16_t color);
+void drawFilledTriangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2,
+                        uint16_t x3, uint16_t y3, uint16_t color);
+```
+
+### Image & text
+
+```cpp
+void drawImage(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *data);
+void writeChar(uint16_t x, uint16_t y, char ch,
+               TFT_FontDef font, uint16_t color, uint16_t bgcolor);
+void writeString(uint16_t x, uint16_t y, const char *str,
+                 TFT_FontDef font, uint16_t color, uint16_t bgcolor);
+```
+
+Available fonts: `TFT_Font_7x10`, `TFT_Font_11x18`, `TFT_Font_16x26`
+
+### Misc
+
+```cpp
+void invertColors(bool invert);
+void tearEffect(bool enable);
+uint16_t width()  const;
+uint16_t height() const;
+```
+
+---
+
+## Colour Constants
+
+Pre-defined RGB565 values live in the `Color::` namespace:
+
+```cpp
+Color::WHITE      Color::BLACK      Color::RED        Color::GREEN
+Color::BLUE       Color::CYAN       Color::YELLOW     Color::MAGENTA
+Color::GRAY       Color::BROWN      Color::DARKBLUE   Color::LIGHTBLUE
+Color::GRAYBLUE   Color::LIGHTGREEN Color::LGRAY      Color::LGRAYBLUE
+Color::LBBLUE
+```
+
+Custom colours can be assembled with the standard RGB565 formula:
+
+```cpp
+uint16_t myColor = ((r & 0x1F) << 11) | ((g & 0x3F) << 5) | (b & 0x1F);
+```
+
+---
+
+## Example
+
+```cpp
+#include "st7789.h"
+
+ST7789 tft(&hspi1,
+    ST7789_RST_GPIO_Port, ST7789_RST_Pin,
+    ST7789_DC_GPIO_Port,  ST7789_DC_Pin,
+    nullptr, 0,
+    240, 240);
+
+int main(void) {
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
+    MX_SPI1_Init();
+
+    tft.init();
+
+    tft.fillColor(Color::BLACK);
+    tft.writeString(10, 10, "Hello STM32!", TFT_Font_16x26, Color::GREEN, Color::BLACK);
+    tft.drawCircle(120, 120, 50, Color::CYAN);
+    tft.drawFilledRectangle(10, 150, 80, 40, Color::RED);
+
+    while (1) {}
+}
+```
+
+---
+
+## SPI Speed Notes
+
+| Connection type | Max reliable clock |
+|-----------------|--------------------|
+| 20 cm jumper wire (no probe) | ~21.25 MHz |
+| 20 cm jumper wire + logic analyser | ~10.6 MHz  |
+| PCB trace | up to 40 MHz |
+
+---
+
+## License
+
+See [LICENSE](LICENSE) — original MIT licence from Floyd-Fish's upstream project is preserved.
